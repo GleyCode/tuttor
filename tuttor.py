@@ -3,7 +3,6 @@ from google import genai
 import os
 import asyncio
 import edge_tts
-import wave
 import io
 import pygame
 
@@ -19,8 +18,8 @@ class CapturaAudio():
         """Inicialize a classe com os seguintes atributos:
         
         Atributos:
-            _reconhecedor:
-            _audio:
+            _reconhecedor: Instância de Recognizer para coleta do áudio.
+            _audio: Bytes do áudio capturado.
         """
         self._reconhecedor = reconhecedor
         self._audio = bytes
@@ -32,7 +31,7 @@ class CapturaAudio():
         (RMS) para eliminar o ruído do ambiente. Por fim, armazena o áudio.
         """
         with sr.Microphone() as source:
-            # Escuta por 1 segundo para calibrar o ruído.
+            # Escuta por 0.5 segundo para calibrar o ruído.
             print("[ Ajustando ruído... ]")
             self._reconhecedor.adjust_for_ambient_noise(source, duration=0.5)
             print("[ Fale... ]")
@@ -48,22 +47,25 @@ class CapturaAudio():
 class TranscreveAudio():
     """Classe responsável pela transcrição do áudio."""
     
-    def __init__(self, audio_bytes):
+    def __init__(self):
         """Inicialize a classe com os seguintes atributos:
         
         Atributos:
-            _reconhecedor = 
-            _audio = 
-            _texto = 
+            _reconhecedor = Instância de Recognizer para transcrição do áudio.
+            _audio = Bytes do áudio capturado.
+            _texto = Áudio transcrito.
         """
         self._reconhecedor = reconhecedor
-        self._audio = audio_bytes
         self._texto = ""
         
-    def transcrever_audio(self) -> None:
-        """"""
+    def transcrever_audio(self, audio) -> None:
+        """Trascreva o áudio recebido.
+        
+        Recebe o áudio como bytes, em seguida passa para o serviço de FTT do 
+        google. 
+        """
         try:
-            self._texto = self._reconhecedor.recognize_google(self._audio)
+            self._texto = self._reconhecedor.recognize_google(audio)
             #language="pt-BR"
         except sr.UnknownValueError:
             print("Não foi possível entender o áudio.")
@@ -78,10 +80,15 @@ class TranscreveAudio():
     
         
 class ProcessamentoIA():
-    """"""
+    """Classe responsável pelo processamento da resposta."""
     
     def __init__(self):
-        """"""
+        """Inicialize a classe com os seguintes atributos:
+        
+        Atributos:
+            _refinado: Instruções para o modelo, afim de melhorar o desempenho.
+            _tts: Classe responsável pela geração do áudio.
+        """
         self._refinador = """
         seu nome é tuttor (só diga seu nome se for perguntado por ele).
         
@@ -94,12 +101,15 @@ class ProcessamentoIA():
         O seu retorno será repassado a um TTS, então evite formatações.
         Resposda com texto puro.
         """
-        self._resposta = ""
         self._tts = RespostaTTS()
+        self._resposta = ""
         
     async def processar_texto(self, texto) -> None:
-        """"""
+        """Gere uma reposta para o texto informado.
         
+        Recebe um texto e repassa para o modelo do Gemini responsável pela 
+        geração de uma resposta aleatória, mas contextualizada.
+        """
         frase_completa = ""
     
         # Continue a execução enquanto a API retorna.
@@ -118,7 +128,7 @@ class ProcessamentoIA():
                 frase_completa += chunk.text
                 
                 # enviar para o TTS
-                if any(p in chunk.text for p in (".", "!", "?")):
+                if any(p in chunk.text for p in (".", "!", "?", "\n")):
                     await self._tts.gerar_audio(frase_completa)
                 
                 # Limpar
@@ -126,20 +136,32 @@ class ProcessamentoIA():
         
     @property
     def resposta(self):
-        """"""
+        """Retorne a resposta se a operação for bem sucedida."""
         if len(self._resposta) > 0:
             return self._resposta
             
 
 class RespostaTTS():
-    """"""
+    """Classe responsável pela geração do áudio."""
     
     def __init__(self):
-        """"""
+        """Inicialize a classe com os seguintes atributos:
+        
+        Atributos:
+            _audio_buffer: Local na memória RAM onde será armazenado o áudio.
+        """
         self._audio_buffer = io.BytesIO() # Buffer na memória.
     
     async def gerar_audio(self, resposta) -> None:
-        """"""
+        """Gere um áudio do texto.
+        
+        Recebe um texto (resposta) e gera um áudio com uma voz neural do edge; 
+        em seguida armazena de forma assíncrona os chunks (pedaços) do áudio em 
+        um buffer na memória.
+        
+        Args:
+            resposta: Resposta (texto) que será transformado em áudio.
+        """
         communicate = edge_tts.Communicate(resposta, "en-US-GuyNeural")
 
         async for chunk in communicate.stream():
@@ -156,7 +178,10 @@ class PlayAudio():
     
     @classmethod
     async def reproduzir_audio(cls, audio_buffer):
-        """"""
+        """Reproduza o áudio recebido.
+        
+        Recebe o áudio da resposta e utiliza o módulo de mixer do Pygame para 
+        reproduzir o áudio."""
         pygame.mixer.music.load(audio_buffer, "mp3")
         pygame.mixer.music.play()
         
@@ -172,15 +197,15 @@ async def main():
             capturador = CapturaAudio()
             capturador.capturar_audio()
     
-            transcritor = TranscreveAudio(capturador.audio)
-            transcritor.transcrever_audio()
+            transcritor = TranscreveAudio()
+            transcritor.transcrever_audio(capturador.audio)
     
-            print(">>> " + transcritor.texto)
+            #print(">>> " + transcritor.texto)
     
             ia = ProcessamentoIA()
             await ia.processar_texto(transcritor.texto)
     
-            print("_" + ia.resposta)
+            #print("_" + ia.resposta)
         
           
         #print("Encerando o Tuttor...")
