@@ -1,4 +1,4 @@
-from typing import Optional, AsyncGenerator
+from typing import Optional
 
 import speech_recognition as sr
 

@@ -1,10 +1,10 @@
-from typing import Optional, AsyncGenerator
+from typing import Optional
 import os
 
 from google import genai
 
 
-CLIENTE = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+CLIENTE = genai.Client(api_key=os.getenv("GEMINI_API_KEY_TUTTOR"))
 
 
 class ProcessamentoIA:
@@ -20,30 +20,15 @@ class ProcessamentoIA:
             "O seu retorno será repassado a um TTS, então evite formatações.\n"
             "Responda com texto puro.\n"
         )
-        self._resposta = str
-        
-    async def processar_texto(self, texto: str) -> AsyncGenerator[str, None]:
-        """Gera uma resposta para o texto informado usando a API do gemini."""
         self._resposta = ""
-        frase_completa = ""
-    
-        # Continua a execução enquanto a API retorna.
-        stream = await CLIENTE.aio.models.generate_content_stream(
-            model="gemini-2.5-flash",  # gemini-flash-latest
+        
+    def processar_texto(self, texto: str) -> None:
+        """Gera uma resposta para o texto informado usando a API do gemini."""
+        self._resposta = CLIENTE.models.generate_content(
+            model="gemini-flash-latest",  # gemini-flash-latest gemini-2.5-flash
             config={"system_instruction": self._refinador},
             contents=texto
-        )
-    
-        # Asynchronous Iteration para acessar pedaços da resposta do modelo.
-        async for chunk in stream:
-            if chunk.text:
-                self._resposta += chunk.text
-                frase_completa += chunk.text
-                
-                if any(p in chunk.text for p in (".", "!", "?", "\n")):  # envia para o TTS
-                    yield frase_completa  # Entrega pedaços sem finalizar a função.
-                
-                    frase_completa = ""  # Limpa para a próxima frase completa.
+        ).text
         
     @property
     def resposta(self) -> Optional[str]:

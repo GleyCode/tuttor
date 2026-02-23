@@ -1,7 +1,7 @@
-import asyncio
 import os
 import io
-from typing import Optional, AsyncGenerator
+from typing import Optional
+import time
 
 import speech_recognition as sr
 from google import genai
@@ -10,7 +10,7 @@ import pygame
 
 
 RECONHECEDOR = sr.Recognizer()
-CLIENTE = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+CLIENTE = genai.Client(api_key=os.getenv("GEMINI_API_KEY_TUTTOR"))
 
 
 class CapturaAudio:
@@ -39,12 +39,12 @@ class TranscreveAudio:
     
     def __init__(self):
         self._reconhecedor = RECONHECEDOR
-        self._texto = str
+        self._texto = ""
         
     def transcrever_audio(self, audio: sr.AudioData) -> None:
         """Transcreve o áudio recebido usando o serviço do Google."""
         try:
-            self._texto = self._reconhecedor.recognize_google(audio)  # language="pt-BR"
+            self._texto = self._reconhecedor.recognize_google(audio, language="pt-BR")  # language="pt-BR"
         except sr.UnknownValueError:
             print("Não foi possível entender o áudio.")
         except sr.RequestError as error:
@@ -62,38 +62,23 @@ class ProcessamentoIA:
     def __init__(self):
         self._refinador = (
             "seu nome é tuttor (só diga se for perguntado por ele).\n"
-            "Você é um tutor de inglês conciso (lacônico).\n"
+            "Você é um psicologa (lacônico).\n"
             "Seu objetivo é criar um contexto; conversação com o usuário.\n"
             "Ele lhe manda uma mensagem e você responde criando conversa.\n"
-            "Se o usuário disse: 'Não entendi' (Português), simplifique.\n"
             "O seu retorno será repassado a um TTS, então evite formatações.\n"
             "Responda com texto puro.\n"
         )
-        self._resposta = str
-        
-    async def processar_texto(self, texto: str) -> AsyncGenerator[str, None]:
-        """Gera uma resposta para o texto informado usando a API do gemini."""
         self._resposta = ""
-        frase_completa = ""
+        
+    def processar_texto(self, texto: str) -> None:
+        """Gera uma resposta para o texto informado usando a API do gemini."""
     
-        # Continua a execução enquanto a API retorna.
-        stream = await CLIENTE.aio.models.generate_content_stream(
-            model="gemini-flash-latest",  # gemini-2.5-flash
+        self._resposta = CLIENTE.models.generate_content(
+            model="gemini-flash-latest",  # gemini-flash-latest gemini-2.5-flash
             config={"system_instruction": self._refinador},
             contents=texto
-        )
-    
-        # Asynchronous Iteration para acessar pedaços da resposta do modelo.
-        async for chunk in stream:
-            if chunk.text:
-                self._resposta += chunk.text
-                frase_completa += chunk.text
-                
-                if any(p in chunk.text for p in (".", "!", "?", "\n")):  # envia para o TTS
-                    yield frase_completa  # Entrega pedaços sem finalizar a função.
-                
-                    frase_completa = ""  # Limpa para a próxima frase completa.
-        
+        ).text
+            
     @property
     def resposta(self) -> Optional[str]:
         """Retorna a resposta se a operação for bem sucedida."""
@@ -103,13 +88,13 @@ class ProcessamentoIA:
 class RespostaTTS:
     """Gera um áudio para a resposta do gemini usando voz neural do edge."""
     
-    async def gerar_audio(cls, resposta: str) -> None:
+    def gerar_audio(self, resposta: str) -> None:
         """Gera um áudio do texto usando voz neural do edge-tts."""
         audio_buffer = io.BytesIO() # Buffer na memória para armazenar o áudio.
         
-        communicate = edge_tts.Communicate(resposta, "en-US-GuyNeural")
+        communicate = edge_tts.Communicate(resposta, "pt-BR-FranciscaNeural")
 
-        async for chunk in communicate.stream():
+        for chunk in communicate.stream_sync():
             if chunk["type"] == "audio":
                 audio_buffer.write(chunk["data"])
                 
@@ -122,20 +107,21 @@ class PlayAudio:
     """Reproduz o áudio usando via Pygame."""
     
     @classmethod
-    async def reproduzir_audio(cls, audio_buffer: io.BytesIO) -> None:
+    def reproduzir_audio(cls, audio_buffer: io.BytesIO) -> None:
         """Reproduza o áudio recebido usando os recuros do pygame."""
         pygame.mixer.music.load(audio_buffer, "mp3")  # Carrega o áudio do buffer.
         pygame.mixer.music.play()
         
         while pygame.mixer.music.get_busy():
-            await asyncio.sleep(0.1)
+            time.sleep(0.1)
 
 
-async def main():
+def main():
     """Pipeline de execução do sistema."""
     capturador = CapturaAudio()
     transcritor = TranscreveAudio()
     ia = ProcessamentoIA()
+    tts = RespostaTTS()
     
     pygame.mixer.init()
     
@@ -154,11 +140,9 @@ async def main():
         if texto is None:
             continue
         
-        tts = RespostaTTS()
-        
-        async for frase in ia.processar_texto(texto):
-            audio_buffer = await tts.gerar_audio(frase)
-            await PlayAudio.reproduzir_audio(audio_buffer)
+        ia.processar_texto(texto)
+        audio_buffer = tts.gerar_audio(ia.resposta)
+        PlayAudio.reproduzir_audio(audio_buffer)
             
         # print("_" + ia.resposta)
         
@@ -167,7 +151,7 @@ async def main():
 if __name__ == "__main__":
     # Inicia o loop de eventos.
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         print("Encerrando o Tuttor...")
         pygame.mixer.quit() # Libera corretamente o fone.
